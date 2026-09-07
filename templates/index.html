@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analyst World</title>
+<link rel="icon" href="{{ url_for('static', filename='logo.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="wrap" style="position:relative;">
+
+  <div class="theme-switch">
+    <button data-theme-btn="dark" title="Dark" onclick="applyTheme('dark')"></button>
+    <button data-theme-btn="slate" title="Slate" onclick="applyTheme('slate')"></button>
+    <button data-theme-btn="light" title="Light" onclick="applyTheme('light')"></button>
+  </div>
+
+
+  <div class="hero">
+    <img src="{{ url_for('static', filename='logo.svg') }}" alt="Analyst World">
+    <div>
+      <h1>Analyst World</h1>
+      <p>Turn any webpage into analyst-ready tables.</p>
+    </div>
+  </div>
+
+  <form class="runbar" id="mysqlform" action="/run" method="post">
+    <input type="text" name="source_url" placeholder="https://example.com/some-page-with-a-table"
+           value="{{ submitted_url or '' }}" required>
+    <button type="submit">Run pipeline</button>
+  </form>
+
+  <details class="advanced">
+    <summary>MySQL connection</summary>
+    <div class="adv-grid">
+      <input type="text" name="mysql_host" form="mysqlform" placeholder="host" value="{{ defaults.mysql_host }}">
+      <input type="text" name="mysql_port" form="mysqlform" placeholder="port" value="{{ defaults.mysql_port }}">
+      <input type="text" name="mysql_user" form="mysqlform" placeholder="user" value="{{ defaults.mysql_user }}">
+      <input type="password" name="mysql_password" form="mysqlform" placeholder="password" value="{{ defaults.mysql_password }}">
+      <input type="text" name="mysql_database" form="mysqlform" placeholder="database" value="{{ defaults.mysql_database }}">
+    </div>
+    <p style="margin-top:8px;">These fields submit together with the URL above when you click "Run pipeline".</p>
+  </details>
+
+  {% if result and result.error %}
+  <div class="error-box">{{ result.error }}</div>
+  {% endif %}
+
+  <div class="layer" data-layer="bronze" style="opacity: {{ '1' if result and not result.error else '0.35' }}">
+    <div>
+      <div class="layer-label">Bronze</div>
+      <div class="layer-sub">raw landing</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num">{{ result.bronze_count if result and not result.error else '-' }}</span><span class="lbl">records landed</span></div>
+      </div>
+      {% if result and not result.error %}
+      <div class="chips">
+        {% for record_type, count in result.bronze_chips %}
+        <span class="chip">{{ record_type }} · {{ count }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="layer" data-layer="silver" style="opacity: {{ '1' if result and not result.error else '0.35' }}">
+    <div>
+      <div class="layer-label">Silver</div>
+      <div class="layer-sub">cleaned + flagged</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num">{{ result.silver_count if result and not result.error else '-' }}</span><span class="lbl">fields cleaned</span></div>
+        <div class="stat"><span class="num">{{ result.silver_validity if result and not result.error else '-' }}{{ '%' if result and not result.error }}</span><span class="lbl">valid</span></div>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width: {{ result.silver_validity if result and not result.error else 0 }}%"></div></div>
+    </div>
+  </div>
+
+  <div class="layer" data-layer="gold" style="opacity: {{ '1' if result and not result.error else '0.35' }}">
+    <div>
+      <div class="layer-label">Gold</div>
+      <div class="layer-sub">BI-ready</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num">{{ result.gold_count if result and not result.error else '-' }}</span><span class="lbl">curated rows</span></div>
+      </div>
+      {% if result and not result.error and result.gold_rows %}
+      <div class="table-scroll">
+        <table class="datatable">
+          <thead><tr>{% for col in result.gold_columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in result.gold_rows %}
+            <tr>{% for col in result.gold_columns %}<td>{{ row[col] if row[col] is not none else '' }}</td>{% endfor %}</tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="empty-note">Run the pipeline to see curated output here.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if result and not result.error %}
+  <div class="runlog">
+    <span>run_id: {{ result.config.run_id }}</span>
+    <span>source: {{ result.config.source_url }}</span>
+    <span>status: success</span>
+  </div>
+  {% endif %}
+
+  <div class="dashboard">
+    <h2>Dashboard</h2>
+    {% if result and not result.error and result.gold_rows %}
+    <div class="dash-controls">
+      <div>
+        <label for="xField">Category field</label>
+        <select id="xField" onchange="updateChart()"></select>
+      </div>
+      <div>
+        <label for="yField">Value field</label>
+        <select id="yField" onchange="updateChart()"></select>
+      </div>
+      <div>
+        <label for="chartType">Chart type</label>
+        <select id="chartType" onchange="updateChart()">
+          <option value="bar">Bar</option>
+          <option value="line">Line</option>
+          <option value="pie">Pie</option>
+          <option value="doughnut">Doughnut</option>
+        </select>
+      </div>
+      <div>
+        <label for="palette">Color palette</label>
+        <select id="palette" onchange="updateChart()">
+          <option value="medallion">Medallion</option>
+          <option value="ocean">Ocean</option>
+          <option value="sunset">Sunset</option>
+          <option value="mono">Mono</option>
+        </select>
+      </div>
+    </div>
+    <div class="chart-panel">
+      <canvas id="mainChart"></canvas>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+    {% else %}
+    <p class="empty-note">Run the pipeline to populate the dashboard.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+<script>
+initTheme();
+{% if result and not result.error and result.gold_rows %}
+const GOLD_ROWS = {{ result.gold_rows | tojson }};
+const GOLD_COLUMNS = {{ result.gold_columns | tojson }};
+
+function populateFieldOptions() {
+  const xSel = document.getElementById('xField');
+  const ySel = document.getElementById('yField');
+  GOLD_COLUMNS.forEach(col => {
+    xSel.appendChild(new Option(col, col));
+    ySel.appendChild(new Option(col, col));
+  });
+  if (GOLD_COLUMNS.length > 1) { ySel.selectedIndex = 1; }
+}
+
+function updateChart() {
+  const xCol = document.getElementById('xField').value;
+  const yCol = document.getElementById('yField').value;
+  const type = document.getElementById('chartType').value;
+  const palName = document.getElementById('palette').value;
+  const { labels, values } = toNumericSeries(GOLD_ROWS, xCol, yCol);
+  const palette = renderChart('mainChart', type, palName, labels, values, yCol);
+  if (type === 'pie' || type === 'doughnut') {
+    renderLegend('chartLegend', palette, labels);
+  } else {
+    document.getElementById('chartLegend').innerHTML = '';
+  }
+}
+
+populateFieldOptions();
+updateChart();
+{% endif %}
+</script>
+</body>
+</html>

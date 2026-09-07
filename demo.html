@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analyst World</title>
+<link rel="icon" href="static/logo.svg">
+<link rel="stylesheet" href="static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="wrap" style="position:relative;">
+
+  <div class="theme-switch">
+    <button data-theme-btn="dark" title="Dark" onclick="applyTheme('dark')"></button>
+    <button data-theme-btn="slate" title="Slate" onclick="applyTheme('slate')"></button>
+    <button data-theme-btn="light" title="Light" onclick="applyTheme('light')"></button>
+  </div>
+
+
+  <div class="hero">
+    <img src="static/logo.svg" alt="Analyst World">
+    <div>
+      <h1>Analyst World</h1>
+      <p>Turn any webpage into analyst-ready tables.</p>
+    </div>
+  </div>
+
+  <div class="runbar">
+    <input type="text" id="urlInput" placeholder="https://example.com/some-page-with-a-table" value="https://example-test.local/catalog">
+    <button id="runBtn" onclick="runPipeline()">Run pipeline</button>
+  </div>
+
+  <details class="advanced">
+    <summary>This is a demo build - runs a simulated pipeline with sample data (no live scraping in the browser)</summary>
+    <p style="margin-top:10px;">To run this against a real site, use <code>main.py</code> or the Flask app (<code>app.py</code>) included in this project - both wire up the same three layers you'll see below to a live MySQL database.</p>
+  </details>
+
+  <div class="layer" data-layer="bronze" id="bronzeLayer" style="opacity:0.35">
+    <div>
+      <div class="layer-label">Bronze</div>
+      <div class="layer-sub">raw landing</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num" id="bronzeCount">-</span><span class="lbl">records landed</span></div>
+      </div>
+      <div class="chips" id="bronzeChips"></div>
+    </div>
+  </div>
+
+  <div class="layer" data-layer="silver" id="silverLayer" style="opacity:0.35">
+    <div>
+      <div class="layer-label">Silver</div>
+      <div class="layer-sub">cleaned + flagged</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num" id="silverCount">-</span><span class="lbl">fields cleaned</span></div>
+        <div class="stat"><span class="num" id="silverValidity">-</span><span class="lbl">valid</span></div>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="silverBar" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="layer" data-layer="gold" id="goldLayer" style="opacity:0.35">
+    <div>
+      <div class="layer-label">Gold</div>
+      <div class="layer-sub">BI-ready</div>
+    </div>
+    <div>
+      <div class="stat-row">
+        <div class="stat"><span class="num" id="goldCount">-</span><span class="lbl">curated rows</span></div>
+      </div>
+      <div class="table-scroll">
+        <table class="datatable" id="goldTable">
+          <thead><tr><th>type</th><th>product</th><th>price</th><th>stock</th><th>text</th></tr></thead>
+          <tbody id="goldTableBody"></tbody>
+        </table>
+      </div>
+      <p class="empty-note" id="goldEmpty">Run the pipeline to see curated output here.</p>
+    </div>
+  </div>
+
+  <div class="runlog" id="runLog"></div>
+
+  <div class="dashboard">
+    <h2>Dashboard</h2>
+    <div class="dash-controls">
+      <div>
+        <label for="xField">Category field</label>
+        <select id="xField" onchange="updateChart()">
+          <option value="product">product</option>
+        </select>
+      </div>
+      <div>
+        <label for="yField">Value field</label>
+        <select id="yField" onchange="updateChart()">
+          <option value="price">price</option>
+          <option value="stock">stock</option>
+        </select>
+      </div>
+      <div>
+        <label for="chartType">Chart type</label>
+        <select id="chartType" onchange="updateChart()">
+          <option value="bar">Bar</option>
+          <option value="line">Line</option>
+          <option value="pie">Pie</option>
+          <option value="doughnut">Doughnut</option>
+        </select>
+      </div>
+      <div>
+        <label for="palette">Color palette</label>
+        <select id="palette" onchange="updateChart()">
+          <option value="medallion">Medallion</option>
+          <option value="ocean">Ocean</option>
+          <option value="sunset">Sunset</option>
+          <option value="mono">Mono</option>
+        </select>
+      </div>
+    </div>
+    <div class="chart-panel">
+      <canvas id="mainChart"></canvas>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+  </div>
+
+</div>
+
+<script src="static/dashboard.js"></script>
+<script>
+const SAMPLE = {
+  bronze: { count: 9, chips: [["table_row",4],["paragraph",1],["link",2],["metadata",2]] },
+  silver: { fields: 21, validity: 95.24 },
+  gold: {
+    rows: [
+      {type:"table_row", product:"Widget A", price:"19.99", stock:"42", text:""},
+      {type:"table_row", product:"Widget B", price:"29.99", stock:"", text:""},
+      {type:"table_row", product:"Widget C", price:"9.99", stock:"7", text:""},
+      {type:"paragraph", product:"", price:"", stock:"", text:"Welcome to our store..."},
+    ]
+  }
+};
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function runPipeline() {
+  const btn = document.getElementById('runBtn');
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) { alert('Enter a URL first.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  ['bronzeLayer','silverLayer','goldLayer'].forEach(id => document.getElementById(id).style.opacity = 0.35);
+  document.getElementById('goldTableBody').innerHTML = '';
+  document.getElementById('goldEmpty').style.display = 'block';
+  document.getElementById('runLog').textContent = '';
+
+  const runId = 'run-' + Math.random().toString(16).slice(2, 8);
+  const started = new Date().toISOString();
+
+  await sleep(500);
+  document.getElementById('bronzeLayer').style.opacity = 1;
+  document.getElementById('bronzeCount').textContent = SAMPLE.bronze.count;
+  document.getElementById('bronzeChips').innerHTML = SAMPLE.bronze.chips
+    .map(([t,c]) => `<span class="chip">${t} · ${c}</span>`).join('');
+
+  await sleep(700);
+  document.getElementById('silverLayer').style.opacity = 1;
+  document.getElementById('silverCount').textContent = SAMPLE.silver.fields;
+  document.getElementById('silverValidity').textContent = SAMPLE.silver.validity + '%';
+  document.getElementById('silverBar').style.width = SAMPLE.silver.validity + '%';
+
+  await sleep(700);
+  document.getElementById('goldLayer').style.opacity = 1;
+  document.getElementById('goldCount').textContent = SAMPLE.gold.rows.length;
+  document.getElementById('goldEmpty').style.display = 'none';
+  document.getElementById('goldTableBody').innerHTML = SAMPLE.gold.rows.map(r =>
+    `<tr><td>${r.type}</td><td>${r.product}</td><td>${r.price}</td><td>${r.stock}</td><td>${r.text}</td></tr>`
+  ).join('');
+
+  document.getElementById('runLog').innerHTML =
+    `<span>run_id: ${runId}</span><span>source: ${url}</span><span>started: ${started}</span><span>status: success</span>`;
+
+  btn.disabled = false;
+  btn.textContent = 'Run pipeline';
+  updateChart();
+}
+
+function updateChart() {
+  const xCol = document.getElementById('xField').value;
+  const yCol = document.getElementById('yField').value;
+  const type = document.getElementById('chartType').value;
+  const palName = document.getElementById('palette').value;
+  const { labels, values } = toNumericSeries(SAMPLE.gold.rows, xCol, yCol);
+  const palette = renderChart('mainChart', type, palName, labels, values, yCol);
+  if (type === 'pie' || type === 'doughnut') {
+    renderLegend('chartLegend', palette, labels);
+  } else {
+    document.getElementById('chartLegend').innerHTML = '';
+  }
+}
+
+initTheme();
+updateChart();
+</script>
+</body>
+</html>
